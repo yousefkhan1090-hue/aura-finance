@@ -234,7 +234,6 @@ class DatabaseService:
         with sqlite3.connect(self.db_name) as conn:
             cursor = conn.cursor()
 
-            # Helper clause for filtering by date
             if time_range == "Today":
                 exp_where = "WHERE purchase_date = ?"
                 inc_where = "WHERE receive_date = ?"
@@ -247,6 +246,10 @@ class DatabaseService:
                 exp_where = "WHERE strftime('%Y', purchase_date) = ?"
                 inc_where = "WHERE strftime('%Y', receive_date) = ?"
                 params = (current_year_str,)
+            elif time_range == "Older Than 3 Months":
+                exp_where = "WHERE purchase_date < date('now', '-3 months')"
+                inc_where = "WHERE receive_date < date('now', '-3 months')"
+                params = ()
             else:  # "All Time / Complete Reset"
                 exp_where = ""
                 inc_where = ""
@@ -724,33 +727,38 @@ with tab6:
 # --- TAB 7: DATA MANAGEMENT & CLEANUP ---
 with tab7:
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.subheader("🗑️ Professional Data Purge & Management")
-    st.write("Manage your database by selectively clearing past transactions by time period and record category.")
+    st.subheader("🗑️ Professional Data Management & Archive Purge")
+    st.markdown("Easily filter and clean up legacy database records by specific time horizons, including archive pruning for entries older than three months.")
 
-    col_del1, col_del2 = st.columns(2)
+    col_del1, col_del2 = st.columns(2, gap="large")
 
     with col_del1:
-        st.markdown("#### Select Filter Parameters")
+        st.markdown("#### ⚙️ Filter Configuration")
         target_type = st.selectbox(
-            "Select Record Type to Delete",
+            "Select Target Ledger Category",
             ["Expenses Only", "Income Only", "All Records (Income & Expenses)"]
         )
         time_range = st.selectbox(
-            "Select Time Period",
-            ["Today", "Current Month", "Current Year", "All Time / Complete Reset"]
+            "Select Time Horizon / Filter Rule",
+            ["Today", "Current Month", "Current Year", "Older Than 3 Months", "All Time / Complete Reset"]
         )
+        st.info(f"💡 Selected Rule: Permanent removal of **{target_type.lower()}** matching **{time_range.lower()}**.")
 
     with col_del2:
-        st.markdown("#### Confirmation & Execution")
-        st.warning(f"⚠️ Warning: This action will permanently remove **{target_type}** for **{time_range}**.")
-        confirm_toggle = st.checkbox("I understand and confirm that this action cannot be undone.")
-
-        if st.button("🚨 Execute Selected Data Purge"):
+        st.markdown("#### 🔒 Security & Execution")
+        st.markdown("<div style='background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); padding: 16px; border-radius: 12px; margin-bottom: 16px;'>", unsafe_allow_html=True)
+        st.warning(f"**Action Required:** You are about to purge **{target_type}** for **{time_range}**. This operation cannot be reversed once confirmed.")
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        confirm_toggle = st.checkbox("I authorize this database purge operation.")
+        
+        st.markdown("###")
+        if st.button("🚨 Execute Secure Purge Protocol", use_container_width=True):
             if confirm_toggle:
                 rows_removed = db.delete_records(target_type, time_range)
-                st.success(f"🎉 Cleanup completed! Successfully deleted **{rows_removed}** record(s) from the database.")
+                st.success(f"🎉 Purge operation complete! Successfully removed **{rows_removed}** legacy record(s) from the vault.")
                 st.rerun()
             else:
-                st.error("Please check the confirmation box before executing the purge.")
+                st.error("⚠️ Please check the authorization box to execute this secure action.")
 
     st.markdown('</div>', unsafe_allow_html=True)
