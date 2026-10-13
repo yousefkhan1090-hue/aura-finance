@@ -1,0 +1,5 @@
+groq
+pillow
+pandas
+openpyxl
+streamlit
