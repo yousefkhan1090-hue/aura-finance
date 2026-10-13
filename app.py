@@ -7,7 +7,7 @@ import io
 import pandas as pd
 from datetime import datetime
 from dataclasses import dataclass
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from PIL import Image
 from groq import Groq
 import streamlit as st
@@ -129,6 +129,7 @@ class ReceiptData:
     items: List[ReceiptItem]
     grand_total: float
     category: str = "Uncategorized"
+    location_details: str = "In-Store / Direct"
 
 
 # --- Database Service ---
@@ -147,6 +148,8 @@ class DatabaseService:
                     purchase_date TEXT,
                     grand_total REAL,
                     category TEXT,
+                    location_details TEXT DEFAULT 'In-Store / Direct',
+                    entry_timestamp TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
@@ -168,17 +171,20 @@ class DatabaseService:
                     receive_date TEXT,
                     amount REAL,
                     category TEXT,
+                    location_details TEXT DEFAULT 'Direct Deposit / Cash',
+                    entry_timestamp TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
             conn.commit()
 
     def save_expense(self, data: ReceiptData) -> int:
+        timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with sqlite3.connect(self.db_name) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO expenses (store_name, purchase_date, grand_total, category) VALUES (?, ?, ?, ?)",
-                (data.store_name, data.date, data.grand_total, data.category)
+                "INSERT INTO expenses (store_name, purchase_date, grand_total, category, location_details, entry_timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+                (data.store_name, data.date, data.grand_total, data.category, data.location_details, timestamp_str)
             )
             expense_id = cursor.lastrowid
             for item in data.items:
@@ -189,12 +195,13 @@ class DatabaseService:
             conn.commit()
         return expense_id
 
-    def save_income(self, source: str, date: str, amount: float, category: str):
+    def save_income(self, source: str, date: str, amount: float, category: str, location: str):
+        timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with sqlite3.connect(self.db_name) as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT INTO incomes (source_name, receive_date, amount, category) VALUES (?, ?, ?, ?)",
-                (source, date, amount, category)
+                "INSERT INTO incomes (source_name, receive_date, amount, category, location_details, entry_timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+                (source, date, amount, category, location, timestamp_str)
             )
             conn.commit()
 
@@ -216,11 +223,32 @@ class DatabaseService:
             cursor.execute("SELECT category, SUM(grand_total) FROM expenses GROUP BY category")
             expense_categories = {row[0]: row[1] for row in cursor.fetchall()}
 
-            cursor.execute("SELECT id, store_name, purchase_date, grand_total, category FROM expenses ORDER BY id DESC")
-            expense_records = [{"ID": r[0], "Store/Merchant": r[1], "Date": r[2], "Amount (DJF)": r[3], "Category": r[4]} for r in cursor.fetchall()]
+            # Professional Ledgers with exact Time, Location, Name, Category & Amount
+            cursor.execute("SELECT id, entry_timestamp, store_name, category, location_details, grand_total FROM expenses ORDER BY id DESC")
+            expense_records = [
+                {
+                    "Transaction ID": f"EXP-{r[0]:04d}",
+                    "Date & Time": r[1] if r[1] else r[2],
+                    "Place / Merchant Name": r[2],
+                    "Type of Place / Category": r[3],
+                    "Origin / Location": r[4] if r[4] else "In-Store",
+                    "Amount Spent (DJF)": r[5]
+                }
+                for r in cursor.fetchall()
+            ]
 
-            cursor.execute("SELECT id, source_name, receive_date, amount, category FROM incomes ORDER BY id DESC")
-            income_records = [{"ID": r[0], "Income Source": r[1], "Date": r[2], "Amount (DJF)": r[3], "Category": r[4]} for r in cursor.fetchall()]
+            cursor.execute("SELECT id, entry_timestamp, source_name, category, location_details, amount FROM incomes ORDER BY id DESC")
+            income_records = [
+                {
+                    "Transaction ID": f"INC-{r[0]:04d}",
+                    "Date & Time": r[1] if r[1] else r[2],
+                    "Income Source Name": r[2],
+                    "Source Type / Category": r[3],
+                    "Received From / Method": r[4] if r[4] else "Direct Deposit",
+                    "Amount Received (DJF)": r[5]
+                }
+                for r in cursor.fetchall()
+            ]
 
         return {
             "daily_expense": daily_expense,
@@ -245,7 +273,8 @@ class GroqAIService:
             "Extract details and return strictly as a valid JSON object with keys: "
             "\"store_name\" (string), \"date\" (string YYYY-MM-DD), "
             "\"items\" (list of objects with keys: \"description\", \"quantity\", \"unit_price\", \"total_price\"), "
-            "\"grand_total\" (number in Djibouti Francs DJF), and \"category\" (e.g., Groceries, Dining, Utilities, Entertainment, Shopping). "
+            "\"grand_total\" (number in Djibouti Francs DJF), \"category\" (e.g., Groceries, Dining, Utilities, Entertainment, Shopping), "
+            "and \"location_details\" (extracted city/address or store branch if visible, else 'Retail Branch'). "
             "Return raw JSON only, no markdown blocks."
         )
 
@@ -277,7 +306,8 @@ class GroqAIService:
             date=parsed.get("date", datetime.now().strftime("%Y-%m-%d")),
             items=items,
             grand_total=float(parsed.get("grand_total", 0.0)),
-            category=parsed.get("category", "General")
+            category=parsed.get("category", "General"),
+            location_details=parsed.get("location_details", "In-Store / Direct")
         )
 
     def transcribe_audio(self, audio_file_path: str) -> str:
@@ -288,6 +318,21 @@ class GroqAIService:
                 response_format="text"
             )
         return transcription
+
+    def extract_entry_details(self, text: str) -> Tuple[str, float, str]:
+        """Extracts place/source name, numerical amount, and location/origin from voice input."""
+        prompt = (
+            f"Extract the name/source/merchant, numerical amount, and location/place origin from this phrase: '{text}'. "
+            "Return strictly a JSON object with keys: \"name\" (string), \"amount\" (number), and \"location\" (string, e.g., 'City Mall', 'Online Transfer', 'Main Branch', etc.). "
+            "If no location is mentioned, return 'Direct / Local'. If no amount is found, return 0.0. Raw JSON only, no markdown."
+        )
+        completion = self.client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="openai/gpt-oss-120b"
+        )
+        cleaned = completion.choices[0].message.content.replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(cleaned)
+        return parsed.get("name", text), float(parsed.get("amount", 0.0)), parsed.get("location", "Direct / Local")
 
     def get_financial_advice(self, analytics_data: Dict[str, Any], user_query: str) -> str:
         system_prompt = (
@@ -368,7 +413,6 @@ with tab1:
 
     st.markdown("###")
     
-    # Proactive Personal Expense Assistant Notice Banner
     st.markdown("#### 🔔 Proactive Assistant Notices")
     with st.spinner("Assistant is analyzing your recent cash flow..."):
         try:
@@ -386,7 +430,7 @@ with tab1:
         else:
             st.info("No expense data recorded yet.")
     with col_r:
-        st.markdown("#### Recent Expenses")
+        st.markdown("#### Recent Expenses Ledger")
         if data["expense_records"]:
             st.dataframe(pd.DataFrame(data["expense_records"]), use_container_width=True, hide_index=True)
         else:
@@ -406,12 +450,12 @@ with tab2:
             st.image(uploaded_receipt, caption="Preview", use_container_width=True)
         with col_res:
             if st.button("🚀 Process Receipt with Vision AI"):
-                with st.spinner("Analyzing receipt..."):
+                with st.spinner("Analyzing receipt place, date, and items..."):
                     try:
                         file_bytes = uploaded_receipt.read()
                         receipt_data = groq_ai.scan_receipt(file_bytes)
                         db.save_expense(receipt_data)
-                        st.success(f"Successfully logged receipt from **{receipt_data.store_name}** for **{receipt_data.grand_total:,.2f} DJF**!")
+                        st.success(f"Successfully logged receipt from **{receipt_data.store_name}** ({receipt_data.location_details}) for **{receipt_data.grand_total:,.2f} DJF**!")
                         
                         items_df = pd.DataFrame([
                             {"Description": i.description, "Qty": i.quantity, "Unit Price": f"{i.unit_price:,.2f} DJF", "Total": f"{i.total_price:,.2f} DJF"}
@@ -431,36 +475,41 @@ with tab3:
     col_inc_text, col_inc_voice = st.columns([1.2, 1])
     
     # Voice Dictation Column
+    speech_inc_name = ""
+    speech_inc_amt = 0.0
+    speech_inc_loc = "Direct Deposit"
+    
     with col_inc_voice:
-        st.markdown("#### 🎙️ Speak Income Source")
-        inc_voice_audio = st.audio_input("Record Income Source Name", key="income_voice_recorder")
-        speech_inc_source = ""
+        st.markdown("#### 🎙️ Speak Income Details")
+        st.caption("Say something like: *'Salary 150000 DJF from Main Office'*")
+        inc_voice_audio = st.audio_input("Record Voice", key="income_voice_recorder")
         if inc_voice_audio is not None:
-            with st.spinner("Transcribing source name..."):
+            with st.spinner("Extracting source name, amount, and place..."):
                 try:
                     temp_inc_path = "temp_inc_voice.wav"
                     with open(temp_inc_path, "wb") as f:
                         f.write(inc_voice_audio.getbuffer())
-                    speech_inc_source = groq_ai.transcribe_audio(temp_inc_path)
-                    st.success(f"Transcribed: *\"{speech_inc_source}\"*")
+                    raw_text = groq_ai.transcribe_audio(temp_inc_path)
+                    speech_inc_name, speech_inc_amt, speech_inc_loc = groq_ai.extract_entry_details(raw_text)
+                    st.success(f"Extracted: **{speech_inc_name}** ({speech_inc_loc}) — **{speech_inc_amt:,.2f} DJF**")
                     if os.path.exists(temp_inc_path):
                         os.remove(temp_inc_path)
                 except Exception as e:
-                    st.error(f"Voice transcription error: {e}")
+                    st.error(f"Voice extraction error: {e}")
 
     # Form Column
     with col_inc_text:
         with st.form("income_form"):
-            default_inc_value = speech_inc_source if speech_inc_source else ""
-            inc_source = st.text_input("Payer / Source", value=default_inc_value, placeholder="e.g., Corporate Salary")
-            inc_amount = st.number_input("Amount (DJF)", min_value=0.0, format="%.2f", step=1000.0)
+            inc_source = st.text_input("Payer / Source Name", value=speech_inc_name, placeholder="e.g., Corporate Salary")
+            inc_location = st.text_input("Received From / Method / Place", value=speech_inc_loc, placeholder="e.g., Bank Transfer / Main Branch")
+            inc_amount = st.number_input("Amount (DJF)", min_value=0.0, value=speech_inc_amt, format="%.2f", step=1000.0)
             inc_category = st.selectbox("Category", ["Salary", "Freelance / Business", "Investments", "Gifts", "Other Income"])
             
             submitted_inc = st.form_submit_button("💾 Log Income Entry")
             if submitted_inc:
                 if inc_source and inc_amount > 0:
-                    db.save_income(inc_source, datetime.now().strftime("%Y-%m-%d"), inc_amount, inc_category)
-                    st.success(f"Logged income of **{inc_amount:,.2f} DJF** from **{inc_source}**!")
+                    db.save_income(inc_source, datetime.now().strftime("%Y-%m-%d"), inc_amount, inc_category, inc_location)
+                    st.success(f"Logged income of **{inc_amount:,.2f} DJF** from **{inc_source}** ({inc_location})!")
                 else:
                     st.warning("Please enter a valid source and amount.")
 
@@ -481,30 +530,35 @@ with tab4:
     col_exp_text, col_exp_voice = st.columns([1.2, 1])
     
     # Voice Dictation Column
+    speech_exp_store = ""
+    speech_exp_amt = 0.0
+    speech_exp_loc = "In-Store / Local"
+    
     with col_exp_voice:
-        st.markdown("#### 🎙️ Speak Merchant Name")
-        exp_voice_audio = st.audio_input("Record Store/Merchant Name", key="expense_voice_recorder")
-        speech_exp_store = ""
+        st.markdown("#### 🎙️ Speak Expense Details")
+        st.caption("Say something like: *'Supermarket 5000 DJF at City Center Mall'*")
+        exp_voice_audio = st.audio_input("Record Voice", key="expense_voice_recorder")
         if exp_voice_audio is not None:
-            with st.spinner("Transcribing merchant name..."):
+            with st.spinner("Extracting store, place location, and amount..."):
                 try:
                     temp_exp_path = "temp_exp_voice.wav"
                     with open(temp_exp_path, "wb") as f:
                         f.write(exp_voice_audio.getbuffer())
-                    speech_exp_store = groq_ai.transcribe_audio(temp_exp_path)
-                    st.success(f"Transcribed: *\"{speech_exp_store}\"*")
+                    raw_text = groq_ai.transcribe_audio(temp_exp_path)
+                    speech_exp_store, speech_exp_amt, speech_exp_loc = groq_ai.extract_entry_details(raw_text)
+                    st.success(f"Extracted: **{speech_exp_store}** ({speech_exp_loc}) — **{speech_exp_amt:,.2f} DJF**")
                     if os.path.exists(temp_exp_path):
                         os.remove(temp_exp_path)
                 except Exception as e:
-                    st.error(f"Voice transcription error: {e}")
+                    st.error(f"Voice extraction error: {e}")
 
     # Form Column
     with col_exp_text:
         with st.form("manual_entry_form"):
-            default_exp_value = speech_exp_store if speech_exp_store else ""
-            exp_store = st.text_input("Merchant / Store", value=default_exp_value, placeholder="e.g., Grand Market")
-            exp_amount = st.number_input("Grand Total (DJF)", min_value=0.0, format="%.2f", step=100.0)
-            exp_category = st.selectbox("Category", ["Groceries", "Dining", "Utilities", "Entertainment", "Shopping", "Transport", "General"])
+            exp_store = st.text_input("Merchant / Store / Place Name", value=speech_exp_store, placeholder="e.g., Grand Market")
+            exp_location = st.text_input("Place / Branch / Location", value=speech_exp_loc, placeholder="e.g., Downtown Branch / Online")
+            exp_amount = st.number_input("Grand Total (DJF)", min_value=0.0, value=speech_exp_amt, format="%.2f", step=100.0)
+            exp_category = st.selectbox("Type of Place / Category", ["Groceries", "Dining", "Utilities", "Entertainment", "Shopping", "Transport", "General"])
             
             submitted_exp = st.form_submit_button("💾 Log Expense Entry")
             if submitted_exp:
@@ -514,10 +568,11 @@ with tab4:
                         date=datetime.now().strftime("%Y-%m-%d"),
                         items=[ReceiptItem(description="Manual Entry", quantity=1, unit_price=exp_amount, total_price=exp_amount)],
                         grand_total=exp_amount,
-                        category=exp_category
+                        category=exp_category,
+                        location_details=exp_location
                     )
                     db.save_expense(manual_receipt)
-                    st.success(f"Logged expense of **{exp_amount:,.2f} DJF** under **{exp_category}**.")
+                    st.success(f"Logged expense of **{exp_amount:,.2f} DJF** under **{exp_category}** for **{exp_store}** ({exp_location}).")
                 else:
                     st.warning("Please enter a valid store and amount.")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -578,25 +633,26 @@ with tab6:
             st.success("✨ Within Budget!")
 
     with col_b2:
-        st.markdown("#### Export Excel Workbook")
+        st.markdown("#### Export Executive Excel Workbook")
+        st.write("Generates a structured multi-sheet Excel file (`.xlsx`) detailing exact transaction dates/times, place names, location origins, amounts, and categories.")
         if st.button("📥 Generate Professional Excel (.xlsx)"):
             try:
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df_exp = pd.DataFrame(analytics["expense_records"]) if analytics["expense_records"] else pd.DataFrame(columns=["ID", "Store/Merchant", "Date", "Amount (DJF)", "Category"])
-                    df_inc = pd.DataFrame(analytics["income_records"]) if analytics["income_records"] else pd.DataFrame(columns=["ID", "Income Source", "Date", "Amount (DJF)", "Category"])
+                    df_exp = pd.DataFrame(analytics["expense_records"]) if analytics["expense_records"] else pd.DataFrame(columns=["Transaction ID", "Date & Time", "Place / Merchant Name", "Type of Place / Category", "Origin / Location", "Amount Spent (DJF)"])
+                    df_inc = pd.DataFrame(analytics["income_records"]) if analytics["income_records"] else pd.DataFrame(columns=["Transaction ID", "Date & Time", "Income Source Name", "Source Type / Category", "Received From / Method", "Amount Received (DJF)"])
                     
                     df_inc.to_excel(writer, sheet_name='Income Ledger', index=False)
                     df_exp.to_excel(writer, sheet_name='Expense Ledger', index=False)
                 
                 excel_data = output.getvalue()
                 st.download_button(
-                    label="📥 Download Excel File",
+                    label="📥 Download Professional Excel File",
                     data=excel_data,
-                    file_name=f"aura_finance_report_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                    file_name=f"aura_finance_executive_report_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-                st.success("Excel report generated successfully!")
+                st.success("Executive Excel report generated successfully with full detail headers!")
             except Exception as e:
                 st.error(f"Error: {e}")
     st.markdown('</div>', unsafe_allow_html=True)
