@@ -427,18 +427,42 @@ with tab2:
 with tab3:
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
     st.subheader("💵 Income Entry (DJF)")
-    with st.form("income_form"):
-        inc_source = st.text_input("Payer / Source", placeholder="e.g., Corporate Salary")
-        inc_amount = st.number_input("Amount (DJF)", min_value=0.0, format="%.2f", step=1000.0)
-        inc_category = st.selectbox("Category", ["Salary", "Freelance / Business", "Investments", "Gifts", "Other Income"])
-        
-        submitted_inc = st.form_submit_button("💾 Log Income Entry")
-        if submitted_inc:
-            if inc_source and inc_amount > 0:
-                db.save_income(inc_source, datetime.now().strftime("%Y-%m-%d"), inc_amount, inc_category)
-                st.success(f"Logged income of **{inc_amount:,.2f} DJF** from **{inc_source}**!")
-            else:
-                st.warning("Please enter a valid source and amount.")
+    
+    col_inc_text, col_inc_voice = st.columns([1.2, 1])
+    
+    # Voice Dictation Column
+    with col_inc_voice:
+        st.markdown("#### 🎙️ Speak Income Source")
+        inc_voice_audio = st.audio_input("Record Income Source Name", key="income_voice_recorder")
+        speech_inc_source = ""
+        if inc_voice_audio is not None:
+            with st.spinner("Transcribing source name..."):
+                try:
+                    temp_inc_path = "temp_inc_voice.wav"
+                    with open(temp_inc_path, "wb") as f:
+                        f.write(inc_voice_audio.getbuffer())
+                    speech_inc_source = groq_ai.transcribe_audio(temp_inc_path)
+                    st.success(f"Transcribed: *\"{speech_inc_source}\"*")
+                    if os.path.exists(temp_inc_path):
+                        os.remove(temp_inc_path)
+                except Exception as e:
+                    st.error(f"Voice transcription error: {e}")
+
+    # Form Column
+    with col_inc_text:
+        with st.form("income_form"):
+            default_inc_value = speech_inc_source if speech_inc_source else ""
+            inc_source = st.text_input("Payer / Source", value=default_inc_value, placeholder="e.g., Corporate Salary")
+            inc_amount = st.number_input("Amount (DJF)", min_value=0.0, format="%.2f", step=1000.0)
+            inc_category = st.selectbox("Category", ["Salary", "Freelance / Business", "Investments", "Gifts", "Other Income"])
+            
+            submitted_inc = st.form_submit_button("💾 Log Income Entry")
+            if submitted_inc:
+                if inc_source and inc_amount > 0:
+                    db.save_income(inc_source, datetime.now().strftime("%Y-%m-%d"), inc_amount, inc_category)
+                    st.success(f"Logged income of **{inc_amount:,.2f} DJF** from **{inc_source}**!")
+                else:
+                    st.warning("Please enter a valid source and amount.")
 
     st.markdown("#### Income Ledger")
     data_inc = db.get_comprehensive_analytics()
@@ -453,25 +477,49 @@ with tab3:
 with tab4:
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
     st.subheader("💳 Quick Expense Entry (DJF)")
-    with st.form("manual_entry_form"):
-        exp_store = st.text_input("Merchant / Store", placeholder="e.g., Grand Market")
-        exp_amount = st.number_input("Grand Total (DJF)", min_value=0.0, format="%.2f", step=100.0)
-        exp_category = st.selectbox("Category", ["Groceries", "Dining", "Utilities", "Entertainment", "Shopping", "Transport", "General"])
-        
-        submitted_exp = st.form_submit_button("💾 Log Expense Entry")
-        if submitted_exp:
-            if exp_store and exp_amount > 0:
-                manual_receipt = ReceiptData(
-                    store_name=exp_store,
-                    date=datetime.now().strftime("%Y-%m-%d"),
-                    items=[ReceiptItem(description="Manual Entry", quantity=1, unit_price=exp_amount, total_price=exp_amount)],
-                    grand_total=exp_amount,
-                    category=exp_category
-                )
-                db.save_expense(manual_receipt)
-                st.success(f"Logged expense of **{exp_amount:,.2f} DJF** under **{exp_category}**.")
-            else:
-                st.warning("Please enter a valid store and amount.")
+    
+    col_exp_text, col_exp_voice = st.columns([1.2, 1])
+    
+    # Voice Dictation Column
+    with col_exp_voice:
+        st.markdown("#### 🎙️ Speak Merchant Name")
+        exp_voice_audio = st.audio_input("Record Store/Merchant Name", key="expense_voice_recorder")
+        speech_exp_store = ""
+        if exp_voice_audio is not None:
+            with st.spinner("Transcribing merchant name..."):
+                try:
+                    temp_exp_path = "temp_exp_voice.wav"
+                    with open(temp_exp_path, "wb") as f:
+                        f.write(exp_voice_audio.getbuffer())
+                    speech_exp_store = groq_ai.transcribe_audio(temp_exp_path)
+                    st.success(f"Transcribed: *\"{speech_exp_store}\"*")
+                    if os.path.exists(temp_exp_path):
+                        os.remove(temp_exp_path)
+                except Exception as e:
+                    st.error(f"Voice transcription error: {e}")
+
+    # Form Column
+    with col_exp_text:
+        with st.form("manual_entry_form"):
+            default_exp_value = speech_exp_store if speech_exp_store else ""
+            exp_store = st.text_input("Merchant / Store", value=default_exp_value, placeholder="e.g., Grand Market")
+            exp_amount = st.number_input("Grand Total (DJF)", min_value=0.0, format="%.2f", step=100.0)
+            exp_category = st.selectbox("Category", ["Groceries", "Dining", "Utilities", "Entertainment", "Shopping", "Transport", "General"])
+            
+            submitted_exp = st.form_submit_button("💾 Log Expense Entry")
+            if submitted_exp:
+                if exp_store and exp_amount > 0:
+                    manual_receipt = ReceiptData(
+                        store_name=exp_store,
+                        date=datetime.now().strftime("%Y-%m-%d"),
+                        items=[ReceiptItem(description="Manual Entry", quantity=1, unit_price=exp_amount, total_price=exp_amount)],
+                        grand_total=exp_amount,
+                        category=exp_category
+                    )
+                    db.save_expense(manual_receipt)
+                    st.success(f"Logged expense of **{exp_amount:,.2f} DJF** under **{exp_category}**.")
+                else:
+                    st.warning("Please enter a valid store and amount.")
     st.markdown('</div>', unsafe_allow_html=True)
 
 
