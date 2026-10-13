@@ -310,6 +310,25 @@ class GroqAIService:
         )
         return completion.choices[0].message.content
 
+    def get_proactive_insights(self, analytics_data: Dict[str, Any]) -> str:
+        system_prompt = (
+            "You are a proactive, sharp personal finance assistant. "
+            "Analyze the user's financial data in Djibouti Francs (DJF). "
+            "Notice notable spending trends, highest categories, or savings status. "
+            "Give 1 or 2 friendly, direct observations or warnings that the user should notice right now. "
+            "Keep it concise, supportive, and pack it with expressive emojis! 🧐💡"
+        )
+        user_prompt = f"Financial Data (in DJF): {json.dumps(analytics_data)}"
+
+        completion = self.client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            model="openai/gpt-oss-120b",
+        )
+        return completion.choices[0].message.content
+
 
 # --- Initialize Services ---
 db = DatabaseService()
@@ -346,6 +365,17 @@ with tab1:
         st.metric("Monthly Expense", f"{data['monthly_expense']:,.2f} DJF")
     with col4:
         st.metric("Net Savings", f"{data['net_monthly']:,.2f} DJF")
+
+    st.markdown("###")
+    
+    # Proactive Personal Expense Assistant Notice Banner
+    st.markdown("#### 🔔 Proactive Assistant Notices")
+    with st.spinner("Assistant is analyzing your recent cash flow..."):
+        try:
+            proactive_msg = groq_ai.get_proactive_insights(data)
+            st.info(proactive_msg)
+        except Exception as e:
+            st.info("👋 Hey there! Add some income or expenses to let your assistant notice your spending habits! 💡")
 
     st.markdown("###")
     col_l, col_r = st.columns(2)
