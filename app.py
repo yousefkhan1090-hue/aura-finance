@@ -132,7 +132,7 @@ class ReceiptData:
     location_details: str = "In-Store / Direct"
 
 
-# --- Database Service with Safe Schema Migration ---
+# --- Database Service with Safe Schema Migration & Deletion Capabilities ---
 class DatabaseService:
     def __init__(self, db_name: str = "aura_luxury.db"):
         self.db_name = db_name
@@ -177,7 +177,7 @@ class DatabaseService:
                 )
             """)
             
-            # Safe column migrations for older database files
+            # Safe column migrations
             try:
                 cursor.execute("ALTER TABLE expenses ADD COLUMN location_details TEXT DEFAULT 'In-Store / Direct'")
             except sqlite3.OperationalError:
@@ -223,6 +223,55 @@ class DatabaseService:
                 (source, date, amount, category, location, timestamp_str)
             )
             conn.commit()
+
+    def delete_records(self, target_type: str, time_range: str) -> int:
+        """Purges database records based on target type and time range."""
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        current_month_str = datetime.now().strftime("%Y-%m")
+        current_year_str = datetime.now().strftime("%Y")
+
+        deleted_count = 0
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+
+            # Helper clause for filtering by date
+            if time_range == "Today":
+                exp_where = "WHERE purchase_date = ?"
+                inc_where = "WHERE receive_date = ?"
+                params = (today_str,)
+            elif time_range == "Current Month":
+                exp_where = "WHERE strftime('%Y-%m', purchase_date) = ?"
+                inc_where = "WHERE strftime('%Y-%m', receive_date) = ?"
+                params = (current_month_str,)
+            elif time_range == "Current Year":
+                exp_where = "WHERE strftime('%Y', purchase_date) = ?"
+                inc_where = "WHERE strftime('%Y', receive_date) = ?"
+                params = (current_year_str,)
+            else:  # "All Time / Complete Reset"
+                exp_where = ""
+                inc_where = ""
+                params = ()
+
+            # Delete Expenses
+            if target_type in ["Expenses Only", "All Records (Income & Expenses)"]:
+                if exp_where:
+                    cursor.execute(f"DELETE FROM expense_items WHERE expense_id IN (SELECT id FROM expenses {exp_where})", params)
+                    cursor.execute(f"DELETE FROM expenses {exp_where}", params)
+                else:
+                    cursor.execute("DELETE FROM expense_items")
+                    cursor.execute("DELETE FROM expenses")
+                deleted_count += cursor.rowcount
+
+            # Delete Incomes
+            if target_type in ["Income Only", "All Records (Income & Expenses)"]:
+                if inc_where:
+                    cursor.execute(f"DELETE FROM incomes {inc_where}", params)
+                else:
+                    cursor.execute("DELETE FROM incomes")
+                deleted_count += cursor.rowcount
+
+            conn.commit()
+        return deleted_count
 
     def get_comprehensive_analytics(self) -> Dict[str, Any]:
         today_str = datetime.now().strftime("%Y-%m-%d")
@@ -402,13 +451,14 @@ st.markdown("<h1 class='gold-title'>AURA FINANCE ELITE</h1>", unsafe_allow_html=
 st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>Enterprise Multilingual Expense, Income & AI Coach Suite (DJF Standard)</p>", unsafe_allow_html=True)
 
 # --- Tabs Architecture ---
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📊 Executive Dashboard", 
     "🧾 AI Receipt Scanner", 
     "💰 Income Manager", 
     "✍️ Expense Entry", 
     "🗣️ Multilingual AI Coach", 
-    "🎯 Budget & Excel Export"
+    "🎯 Budget & Excel Export",
+    "🗑️ Data Management"
 ])
 
 
@@ -668,4 +718,39 @@ with tab6:
                 st.success("Executive Excel report generated successfully with full detail headers!")
             except Exception as e:
                 st.error(f"Error: {e}")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+# --- TAB 7: DATA MANAGEMENT & CLEANUP ---
+with tab7:
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    st.subheader("🗑️ Professional Data Purge & Management")
+    st.write("Manage your database by selectively clearing past transactions by time period and record category.")
+
+    col_del1, col_del2 = st.columns(2)
+
+    with col_del1:
+        st.markdown("#### Select Filter Parameters")
+        target_type = st.selectbox(
+            "Select Record Type to Delete",
+            ["Expenses Only", "Income Only", "All Records (Income & Expenses)"]
+        )
+        time_range = st.selectbox(
+            "Select Time Period",
+            ["Today", "Current Month", "Current Year", "All Time / Complete Reset"]
+        )
+
+    with col_del2:
+        st.markdown("#### Confirmation & Execution")
+        st.warning(f"⚠️ Warning: This action will permanently remove **{target_type}** for **{time_range}**.")
+        confirm_toggle = st.checkbox("I understand and confirm that this action cannot be undone.")
+
+        if st.button("🚨 Execute Selected Data Purge"):
+            if confirm_toggle:
+                rows_removed = db.delete_records(target_type, time_range)
+                st.success(f"🎉 Cleanup completed! Successfully deleted **{rows_removed}** record(s) from the database.")
+                st.rerun()
+            else:
+                st.error("Please check the confirmation box before executing the purge.")
+
     st.markdown('</div>', unsafe_allow_html=True)
