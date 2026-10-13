@@ -132,7 +132,7 @@ class ReceiptData:
     location_details: str = "In-Store / Direct"
 
 
-# --- Database Service ---
+# --- Database Service with Safe Schema Migration ---
 class DatabaseService:
     def __init__(self, db_name: str = "aura_luxury.db"):
         self.db_name = db_name
@@ -176,6 +176,25 @@ class DatabaseService:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # Safe column migrations for older database files
+            try:
+                cursor.execute("ALTER TABLE expenses ADD COLUMN location_details TEXT DEFAULT 'In-Store / Direct'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE expenses ADD COLUMN entry_timestamp TEXT")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE incomes ADD COLUMN location_details TEXT DEFAULT 'Direct Deposit / Cash'")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                cursor.execute("ALTER TABLE incomes ADD COLUMN entry_timestamp TEXT")
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
 
     def save_expense(self, data: ReceiptData) -> int:
@@ -223,7 +242,6 @@ class DatabaseService:
             cursor.execute("SELECT category, SUM(grand_total) FROM expenses GROUP BY category")
             expense_categories = {row[0]: row[1] for row in cursor.fetchall()}
 
-            # Professional Ledgers with exact Time, Location, Name, Category & Amount
             cursor.execute("SELECT id, entry_timestamp, store_name, category, location_details, grand_total FROM expenses ORDER BY id DESC")
             expense_records = [
                 {
@@ -320,7 +338,6 @@ class GroqAIService:
         return transcription
 
     def extract_entry_details(self, text: str) -> Tuple[str, float, str]:
-        """Extracts place/source name, numerical amount, and location/origin from voice input."""
         prompt = (
             f"Extract the name/source/merchant, numerical amount, and location/place origin from this phrase: '{text}'. "
             "Return strictly a JSON object with keys: \"name\" (string), \"amount\" (number), and \"location\" (string, e.g., 'City Mall', 'Online Transfer', 'Main Branch', etc.). "
@@ -474,7 +491,6 @@ with tab3:
     
     col_inc_text, col_inc_voice = st.columns([1.2, 1])
     
-    # Voice Dictation Column
     speech_inc_name = ""
     speech_inc_amt = 0.0
     speech_inc_loc = "Direct Deposit"
@@ -497,7 +513,6 @@ with tab3:
                 except Exception as e:
                     st.error(f"Voice extraction error: {e}")
 
-    # Form Column
     with col_inc_text:
         with st.form("income_form"):
             inc_source = st.text_input("Payer / Source Name", value=speech_inc_name, placeholder="e.g., Corporate Salary")
@@ -529,7 +544,6 @@ with tab4:
     
     col_exp_text, col_exp_voice = st.columns([1.2, 1])
     
-    # Voice Dictation Column
     speech_exp_store = ""
     speech_exp_amt = 0.0
     speech_exp_loc = "In-Store / Local"
@@ -552,7 +566,6 @@ with tab4:
                 except Exception as e:
                     st.error(f"Voice extraction error: {e}")
 
-    # Form Column
     with col_exp_text:
         with st.form("manual_entry_form"):
             exp_store = st.text_input("Merchant / Store / Place Name", value=speech_exp_store, placeholder="e.g., Grand Market")
