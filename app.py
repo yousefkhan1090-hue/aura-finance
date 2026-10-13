@@ -10,13 +10,107 @@ from dataclasses import dataclass
 from typing import List, Dict, Any
 from PIL import Image
 from groq import Groq
-import gradio as gr
+import streamlit as st
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("AuraFinanceGradio")
+logger = logging.getLogger("AuraFinanceLuxury")
 
-# Hardcoded Groq API Key
+# Streamlit Page Configuration
+st.set_page_config(
+    page_title="Aura Finance Elite",
+    page_icon="💳",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# --- Luxury Dark Glassmorphism Theme & Custom CSS ---
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        background-color: #07090e;
+        color: #f3f4f6;
+    }
+    
+    .stApp {
+        background: radial-gradient(circle at 50% -20%, #1e1b4b 0%, #07090e 80%);
+    }
+
+    /* Glassmorphic Cards */
+    .glass-card {
+        background: rgba(17, 24, 39, 0.6);
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 18px;
+        padding: 24px;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+        margin-bottom: 20px;
+    }
+
+    /* Gold / Indigo Gradients */
+    .gold-title {
+        background: linear-gradient(135deg, #fcd34d 0%, #f59e0b 50%, #d97706 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 800;
+        text-align: center;
+        font-size: 2.5rem;
+    }
+
+    /* Metric Cards Styling */
+    div[data-testid="stMetric"] {
+        background: rgba(17, 24, 39, 0.7);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 16px;
+        border-radius: 14px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    }
+    div[data-testid="stMetric"] label {
+        color: #94a3b8 !important;
+        font-weight: 600;
+    }
+
+    /* Modern Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+        background-color: transparent;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: rgba(17, 24, 39, 0.6);
+        border-radius: 12px;
+        padding: 10px 20px;
+        color: #94a3b8;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        font-weight: 600;
+    }
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
+        color: white !important;
+        border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    }
+
+    /* Buttons */
+    .stButton>button {
+        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 12px;
+        padding: 10px 24px;
+        font-weight: 600;
+        box-shadow: 0 4px 20px rgba(79, 70, 229, 0.4);
+        transition: all 0.3s ease;
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(79, 70, 229, 0.6);
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 GROQ_API_KEY = "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"
 
 
@@ -37,16 +131,15 @@ class ReceiptData:
     category: str = "Uncategorized"
 
 
-# --- Database Service (Expenses & Income in DJF) ---
+# --- Database Service ---
 class DatabaseService:
-    def __init__(self, db_name: str = "aura_finance.db"):
+    def __init__(self, db_name: str = "aura_luxury.db"):
         self.db_name = db_name
         self._initialize_database()
 
     def _initialize_database(self):
         with sqlite3.connect(self.db_name) as conn:
             cursor = conn.cursor()
-            # Expenses Table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS expenses (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +161,6 @@ class DatabaseService:
                     FOREIGN KEY (expense_id) REFERENCES expenses (id)
                 )
             """)
-            # Income Table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS incomes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -109,33 +201,21 @@ class DatabaseService:
     def get_comprehensive_analytics(self) -> Dict[str, Any]:
         today_str = datetime.now().strftime("%Y-%m-%d")
         current_month_str = datetime.now().strftime("%Y-%m")
-        current_year_str = datetime.now().strftime("%Y")
 
         with sqlite3.connect(self.db_name) as conn:
             cursor = conn.cursor()
-
-            # Expenses Totals
             cursor.execute("SELECT SUM(grand_total) FROM expenses WHERE purchase_date = ?", (today_str,))
             daily_expense = cursor.fetchone()[0] or 0.0
 
             cursor.execute("SELECT SUM(grand_total) FROM expenses WHERE strftime('%Y-%m', purchase_date) = ?", (current_month_str,))
             monthly_expense = cursor.fetchone()[0] or 0.0
 
-            cursor.execute("SELECT SUM(grand_total) FROM expenses WHERE strftime('%Y', purchase_date) = ?", (current_year_str,))
-            yearly_expense = cursor.fetchone()[0] or 0.0
-
-            # Income Totals
             cursor.execute("SELECT SUM(amount) FROM incomes WHERE strftime('%Y-%m', receive_date) = ?", (current_month_str,))
             monthly_income = cursor.fetchone()[0] or 0.0
 
-            cursor.execute("SELECT SUM(amount) FROM incomes WHERE strftime('%Y', receive_date) = ?", (current_year_str,))
-            yearly_income = cursor.fetchone()[0] or 0.0
-
-            # Category Breakdown
             cursor.execute("SELECT category, SUM(grand_total) FROM expenses GROUP BY category")
             expense_categories = {row[0]: row[1] for row in cursor.fetchall()}
 
-            # Records for tables
             cursor.execute("SELECT id, store_name, purchase_date, grand_total, category FROM expenses ORDER BY id DESC")
             expense_records = [{"ID": r[0], "Store/Merchant": r[1], "Date": r[2], "Amount (DJF)": r[3], "Category": r[4]} for r in cursor.fetchall()]
 
@@ -145,9 +225,7 @@ class DatabaseService:
         return {
             "daily_expense": daily_expense,
             "monthly_expense": monthly_expense,
-            "yearly_expense": yearly_expense,
             "monthly_income": monthly_income,
-            "yearly_income": yearly_income,
             "net_monthly": monthly_income - monthly_expense,
             "expense_categories": expense_categories,
             "expense_records": expense_records,
@@ -160,13 +238,8 @@ class GroqAIService:
     def __init__(self, api_key: str):
         self.client = Groq(api_key=api_key)
 
-    def scan_receipt(self, image_path: str) -> tuple:
-        if not image_path:
-            return "Please upload an image first.", pd.DataFrame()
-        
-        with open(image_path, "rb") as f:
-            base64_img = base64.b64encode(f.read()).decode('utf-8')
-
+    def scan_receipt(self, image_bytes: bytes) -> ReceiptData:
+        base64_img = base64.b64encode(image_bytes).decode('utf-8')
         prompt = (
             "Analyze this receipt image (which could be in any language). "
             "Extract details and return strictly as a valid JSON object with keys: "
@@ -176,88 +249,66 @@ class GroqAIService:
             "Return raw JSON only, no markdown blocks."
         )
 
-        try:
-            completion = self.client.chat.completions.create(
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
-                    ]
-                }],
-                model="qwen/qwen3.8-27b",
+        completion = self.client.chat.completions.create(
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_img}"}}
+                ]
+            }],
+            model="qwen/qwen3.8-27b",
+        )
+        cleaned_json = completion.choices[0].message.content.replace("```json", "").replace("```", "").strip()
+        parsed = json.loads(cleaned_json)
+
+        items = [
+            ReceiptItem(
+                description=i.get("description", "Item"),
+                quantity=int(i.get("quantity", 1)),
+                unit_price=float(i.get("unit_price", 0.0)),
+                total_price=float(i.get("total_price", 0.0))
             )
-            cleaned_json = completion.choices[0].message.content.replace("```json", "").replace("```", "").strip()
-            parsed = json.loads(cleaned_json)
+            for i in parsed.get("items", [])
+        ]
 
-            items = [
-                ReceiptItem(
-                    description=i.get("description", "Item"),
-                    quantity=int(i.get("quantity", 1)),
-                    unit_price=float(i.get("unit_price", 0.0)),
-                    total_price=float(i.get("total_price", 0.0))
-                )
-                for i in parsed.get("items", [])
-            ]
+        return ReceiptData(
+            store_name=parsed.get("store_name", "Unknown Store"),
+            date=parsed.get("date", datetime.now().strftime("%Y-%m-%d")),
+            items=items,
+            grand_total=float(parsed.get("grand_total", 0.0)),
+            category=parsed.get("category", "General")
+        )
 
-            receipt_data = ReceiptData(
-                store_name=parsed.get("store_name", "Unknown Store"),
-                date=parsed.get("date", datetime.now().strftime("%Y-%m-%d")),
-                items=items,
-                grand_total=float(parsed.get("grand_total", 0.0)),
-                category=parsed.get("category", "General")
+    def transcribe_audio(self, audio_file_path: str) -> str:
+        with open(audio_file_path, "rb") as file:
+            transcription = self.client.audio.transcriptions.create(
+                file=(audio_file_path, file.read()),
+                model="whisper-large-v3",
+                response_format="text"
             )
+        return transcription
 
-            db.save_expense(receipt_data)
+    def get_financial_advice(self, analytics_data: Dict[str, Any], user_query: str) -> str:
+        system_prompt = (
+            "You are an expert, professional, and empathetic personal finance manager assistant. "
+            "Analyze the user's financial data in Djibouti Francs (DJF) and answer their query. "
+            "CRITICAL RULE: The primary and ONLY currency used by the user is Djibouti Francs (DJF). Never convert currencies. "
+            "You MUST reply in the exact same language that the user spoke in (English, French, or Urdu). "
+            "Give clear, direct advice on savings, budgeting, and what expenses they should avoid or cut back on. "
+            "Always state currency values in Djibouti Francs (DJF). "
+            "Speak naturally like a friendly human companion, and use plenty of expressive emojis throughout your response! 😊💸"
+        )
+        user_prompt = f"Financial Data (in DJF): {json.dumps(analytics_data)}\n\nUser Question: {user_query}"
 
-            msg = f"🎉 Success! Processed receipt from **{receipt_data.store_name}** for **{receipt_data.grand_total:,.2f} DJF** under **{receipt_data.category}**. Saved securely! 🛒✅"
-            
-            items_df = pd.DataFrame([
-                {"Description": i.description, "Qty": i.quantity, "Unit Price": f"{i.unit_price:,.2f} DJF", "Total": f"{i.total_price:,.2f} DJF"}
-                for i in receipt_data.items
-            ])
-            return msg, items_df
-        except Exception as e:
-            return f"❌ Error scanning receipt: {str(e)}", pd.DataFrame()
-
-    def voice_coach_chat(self, audio_file) -> str:
-        if not audio_file:
-            return "🎙️ Please record an audio message first!"
-        
-        try:
-            with open(audio_file, "rb") as file:
-                transcription = self.client.audio.transcriptions.create(
-                    file=(audio_file, file.read()),
-                    model="whisper-large-v3",
-                    response_format="text"
-                )
-            
-            analytics = db.get_comprehensive_analytics()
-            
-            system_prompt = (
-                "You are an expert, professional, and empathetic personal finance manager assistant. "
-                "Analyze the user's comprehensive financial data (income, expenses, net savings in Djibouti Francs DJF, and categories) "
-                "and answer their query. "
-                "CRITICAL RULE: The primary and ONLY currency used by the user is Djibouti Francs (DJF). Never convert currencies. "
-                "You MUST reply in the exact same language that the user spoke in (English, French, or Urdu). "
-                "Give clear, direct advice on savings, budgeting, and what expenses they should avoid or cut back on. "
-                "Always state currency values in Djibouti Francs (DJF). "
-                "Speak naturally like a friendly human companion, and use plenty of expressive emojis throughout your response! 😊💸"
-            )
-            user_prompt = f"Financial Data (in DJF): {json.dumps(analytics)}\n\nUser Question: {transcription}"
-
-            completion = self.client.chat.completions.create(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                model="openai/gpt-oss-120b",
-            )
-            
-            response_text = f"**🗣️ You asked:** *\"{transcription}\"*\n\n**🤖 Coach Response:**\n{completion.choices[0].message.content}"
-            return response_text
-        except Exception as e:
-            return f"❌ Voice processing error: {str(e)}"
+        completion = self.client.chat.completions.create(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            model="openai/gpt-oss-120b",
+        )
+        return completion.choices[0].message.content
 
 
 # --- Initialize Services ---
@@ -265,160 +316,209 @@ db = DatabaseService()
 groq_ai = GroqAIService(api_key=GROQ_API_KEY)
 
 
-# --- Build Gradio Interface ---
-with gr.Blocks(theme=gr.themes.Soft()) as demo:
-    gr.Markdown("# 💳 Aura Finance Assistant")
-    gr.Markdown("Your sleek, multilingual AI companion for managing income, expenses, and budgeting in Djibouti Francs (DJF)! 🚀 (Supports English, Français, Urdu)")
+# --- Header ---
+st.markdown("<h1 class='gold-title'>AURA FINANCE ELITE</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #94a3b8; margin-bottom: 30px;'>Enterprise Multilingual Expense, Income & AI Coach Suite (DJF Standard)</p>", unsafe_allow_html=True)
 
-    with gr.Tabs():
-        # TAB 1: DASHBOARD
-        with gr.Tab("📊 Dashboard"):
-            gr.Markdown("### Financial Performance Overview")
-            refresh_btn = gr.Button("🔄 Refresh Analytics", variant="secondary")
-            
-            with gr.Row():
-                daily_metric = gr.Number(label="📅 Today's Expense (DJF)", interactive=False)
-                monthly_inc_metric = gr.Number(label="🗓️ Monthly Income (DJF)", interactive=False)
-                monthly_exp_metric = gr.Number(label="📉 Monthly Expense (DJF)", interactive=False)
-                net_metric = gr.Number(label="💎 Net Monthly Savings (DJF)", interactive=False)
+# --- Tabs Architecture ---
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "📊 Executive Dashboard", 
+    "🧾 AI Receipt Scanner", 
+    "💰 Income Manager", 
+    "✍️ Expense Entry", 
+    "🗣️ Multilingual AI Coach", 
+    "🎯 Budget & Excel Export"
+])
 
-            with gr.Row():
-                with gr.Column():
-                    gr.Markdown("### Recent Expenses Ledger")
-                    expense_table = gr.Dataframe(interactive=False)
-                with gr.Column():
-                    gr.Markdown("### Recent Income Ledger")
-                    income_table = gr.Dataframe(interactive=False)
 
-            def update_dashboard():
-                data = db.get_comprehensive_analytics()
-                return (
-                    data["daily_expense"],
-                    data["monthly_income"],
-                    data["monthly_expense"],
-                    data["net_monthly"],
-                    pd.DataFrame(data["expense_records"]),
-                    pd.DataFrame(data["income_records"])
-                )
+# --- TAB 1: DASHBOARD ---
+with tab1:
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    st.subheader("💎 Financial Overview")
+    data = db.get_comprehensive_analytics()
 
-            refresh_btn.click(
-                fn=update_dashboard,
-                outputs=[daily_metric, monthly_inc_metric, monthly_exp_metric, net_metric, expense_table, income_table]
-            )
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Today's Expense", f"{data['daily_expense']:,.2f} DJF")
+    with col2:
+        st.metric("Monthly Income", f"{data['monthly_income']:,.2f} DJF")
+    with col3:
+        st.metric("Monthly Expense", f"{data['monthly_expense']:,.2f} DJF")
+    with col4:
+        st.metric("Net Savings", f"{data['net_monthly']:,.2f} DJF")
 
-        # TAB 2: RECEIPT SCANNER
-        with gr.Tab("🧾 Receipt Scanner"):
-            gr.Markdown("### Multilingual AI Receipt Scanner (DJF)")
-            with gr.Row():
-                receipt_img = gr.Image(type="filepath", label="Upload Receipt Image")
-                with gr.Column():
-                    scan_output_msg = gr.Markdown()
-                    line_items_table = gr.Dataframe(label="Extracted Line Items")
-            
-            scan_btn = gr.Button("🚀 Run AI Scan & Log", variant="primary")
-            scan_btn.click(fn=groq_ai.scan_receipt, inputs=receipt_img, outputs=[scan_output_msg, line_items_table])
+    st.markdown("###")
+    col_l, col_r = st.columns(2)
+    with col_l:
+        st.markdown("#### Expense Categories")
+        if data["expense_categories"]:
+            st.bar_chart(data["expense_categories"])
+        else:
+            st.info("No expense data recorded yet.")
+    with col_r:
+        st.markdown("#### Recent Expenses")
+        if data["expense_records"]:
+            st.dataframe(pd.DataFrame(data["expense_records"]), use_container_width=True, hide_index=True)
+        else:
+            st.info("No recent expenses.")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-        # TAB 3: INCOME MANAGER
-        with gr.Tab("💰 Income Manager"):
-            gr.Markdown("### Record Income Source (DJF)")
-            with gr.Row():
-                inc_source = gr.Textbox(label="Income Source / Payer", placeholder="e.g., Company Salary 🏢")
-                inc_amount = gr.Number(label="Amount (DJF)", value=0.0)
-                inc_category = gr.Dropdown(choices=["Salary", "Freelance / Business", "Investments", "Gifts", "Other Income"], label="Category", value="Salary")
-            
-            inc_btn = gr.Button("💾 Save Income Record", variant="primary")
-            inc_status = gr.Markdown()
 
-            def handle_save_income(source, amount, cat):
-                if not source or amount <= 0:
-                    return "⚠️ Please provide a valid source and amount greater than 0."
-                date_str = datetime.now().strftime("%Y-%m-%d")
-                db.save_income(source, date_str, amount, cat)
-                return f"🎉 Successfully saved {amount:,.2f} DJF from {source}!"
+# --- TAB 2: RECEIPT SCANNER ---
+with tab2:
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    st.subheader("📸 Multilingual Vision Extraction")
+    uploaded_receipt = st.file_uploader("Upload Receipt Photo", type=["jpg", "jpeg", "png"])
 
-            inc_btn.click(fn=handle_save_income, inputs=[inc_source, inc_amount, inc_category], outputs=inc_status)
+    if uploaded_receipt:
+        col_img, col_res = st.columns(2)
+        with col_img:
+            st.image(uploaded_receipt, caption="Preview", use_container_width=True)
+        with col_res:
+            if st.button("🚀 Process Receipt with Vision AI"):
+                with st.spinner("Analyzing receipt..."):
+                    try:
+                        file_bytes = uploaded_receipt.read()
+                        receipt_data = groq_ai.scan_receipt(file_bytes)
+                        db.save_expense(receipt_data)
+                        st.success(f"Successfully logged receipt from **{receipt_data.store_name}** for **{receipt_data.grand_total:,.2f} DJF**!")
+                        
+                        items_df = pd.DataFrame([
+                            {"Description": i.description, "Qty": i.quantity, "Unit Price": f"{i.unit_price:,.2f} DJF", "Total": f"{i.total_price:,.2f} DJF"}
+                            for i in receipt_data.items
+                        ])
+                        st.table(items_df)
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-        # TAB 4: MANUAL EXPENSE ENTRY
-        with gr.Tab("✍️ Expense Entry"):
-            gr.Markdown("### Quick Manual Expense Entry (DJF)")
-            with gr.Row():
-                exp_store = gr.Textbox(label="Store / Merchant Name", placeholder="e.g., Supermarket 🛒")
-                exp_amount = gr.Number(label="Grand Total (DJF)", value=0.0)
-                exp_category = gr.Dropdown(choices=["Groceries", "Dining", "Utilities", "Entertainment", "Shopping", "Transport", "General"], label="Category", value="Groceries")
-            
-            exp_btn = gr.Button("💾 Save Expense Record", variant="primary")
-            exp_status = gr.Markdown()
 
-            def handle_save_expense(store, amount, cat):
-                if not store or amount <= 0:
-                    return "⚠️ Please provide a valid store name and amount greater than 0."
-                date_str = datetime.now().strftime("%Y-%m-%d")
+# --- TAB 3: INCOME MANAGER ---
+with tab3:
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    st.subheader("💵 Income Entry (DJF)")
+    with st.form("income_form"):
+        inc_source = st.text_input("Payer / Source", placeholder="e.g., Corporate Salary")
+        inc_amount = st.number_input("Amount (DJF)", min_value=0.0, format="%.2f", step=1000.0)
+        inc_category = st.selectbox("Category", ["Salary", "Freelance / Business", "Investments", "Gifts", "Other Income"])
+        
+        submitted_inc = st.form_submit_button("💾 Log Income Entry")
+        if submitted_inc:
+            if inc_source and inc_amount > 0:
+                db.save_income(inc_source, datetime.now().strftime("%Y-%m-%d"), inc_amount, inc_category)
+                st.success(f"Logged income of **{inc_amount:,.2f} DJF** from **{inc_source}**!")
+            else:
+                st.warning("Please enter a valid source and amount.")
+
+    st.markdown("#### Income Ledger")
+    data_inc = db.get_comprehensive_analytics()
+    if data_inc["income_records"]:
+        st.dataframe(pd.DataFrame(data_inc["income_records"]), use_container_width=True, hide_index=True)
+    else:
+        st.info("No income records found.")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+# --- TAB 4: EXPENSE ENTRY ---
+with tab4:
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    st.subheader("💳 Quick Expense Entry (DJF)")
+    with st.form("manual_entry_form"):
+        exp_store = st.text_input("Merchant / Store", placeholder="e.g., Grand Market")
+        exp_amount = st.number_input("Grand Total (DJF)", min_value=0.0, format="%.2f", step=100.0)
+        exp_category = st.selectbox("Category", ["Groceries", "Dining", "Utilities", "Entertainment", "Shopping", "Transport", "General"])
+        
+        submitted_exp = st.form_submit_button("💾 Log Expense Entry")
+        if submitted_exp:
+            if exp_store and exp_amount > 0:
                 manual_receipt = ReceiptData(
-                    store_name=store,
-                    date=date_str,
-                    items=[ReceiptItem(description="Manual Entry", quantity=1, unit_price=amount, total_price=amount)],
-                    grand_total=amount,
-                    category=cat
+                    store_name=exp_store,
+                    date=datetime.now().strftime("%Y-%m-%d"),
+                    items=[ReceiptItem(description="Manual Entry", quantity=1, unit_price=exp_amount, total_price=exp_amount)],
+                    grand_total=exp_amount,
+                    category=exp_category
                 )
                 db.save_expense(manual_receipt)
-                return f"🎉 Successfully logged {amount:,.2f} DJF under {cat} for {store}!"
+                st.success(f"Logged expense of **{exp_amount:,.2f} DJF** under **{exp_category}**.")
+            else:
+                st.warning("Please enter a valid store and amount.")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-            exp_btn.click(fn=handle_save_expense, inputs=[exp_store, exp_amount, exp_category], outputs=exp_status)
 
-        # TAB 5: VOICE AI COACH
-        with gr.Tab("🗣️ Voice AI Coach"):
-            gr.Markdown("### Multilingual Voice AI Coach (English, Français, اردو)")
-            gr.Markdown("Record your voice message below. The coach will understand and reply back in your exact language with human warmth and emojis! ✨")
-            
-            audio_input = gr.Audio(sources=["microphone", "upload"], type="filepath", label="Record Your Question")
-            coach_btn = gr.Button("✨ Chat with Coach", variant="primary")
-            coach_output = gr.Markdown()
+# --- TAB 5: MULTILINGUAL AI COACH ---
+with tab5:
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    st.subheader("🎙️ Multilingual Voice AI Financial Companion")
+    st.markdown("Speak in **English**, **French**, or **Urdu**. The coach will respond in the exact same language.")
+    
+    audio_value = st.audio_input("Record Audio Question")
 
-            coach_btn.click(fn=groq_ai.voice_coach_chat, inputs=audio_input, outputs=coach_output)
+    if audio_value is not None:
+        st.audio(audio_value)
+        if st.button("✨ Consult AI Coach"):
+            with st.spinner("Processing voice request..."):
+                try:
+                    audio_path = "temp_voice.wav"
+                    with open(audio_path, "wb") as f:
+                        f.write(audio_value.getbuffer())
 
-        # TAB 6: BUDGET & EXCEL EXPORT
-        with gr.Tab("🎯 Budget & Excel Export"):
-            gr.Markdown("### Budget Targets & Professional Excel Export")
-            
-            with gr.Row():
-                with gr.Column():
-                    gr.Markdown("#### Monthly Budget Goal")
-                    budget_input = gr.Number(label="Monthly Spending Limit (DJF)", value=50000.0)
-                    check_budget_btn = gr.Button("Check Budget Status")
-                    budget_status = gr.Markdown()
+                    user_query = groq_ai.transcribe_audio(audio_path)
+                    st.markdown(f"**🗣️ You asked:** *\"{user_query}\"*")
 
-                    def evaluate_budget(limit):
-                        analytics = db.get_comprehensive_analytics()
-                        spent = analytics["monthly_expense"]
-                        if spent > limit:
-                            return f"🚨 **Alert**: You've spent {spent:,.2f} DJF out of your {limit:,.2f} DJF limit. You are over budget! 💪"
-                        else:
-                            return f"✨ **Looking Great**: You've spent {spent:,.2f} DJF out of your {limit:,.2f} DJF limit. You're within budget! 👍"
+                    analytics = db.get_comprehensive_analytics()
+                    ai_response = groq_ai.get_financial_advice(analytics, user_query)
 
-                    check_budget_btn.click(fn=evaluate_budget, inputs=budget_input, outputs=budget_status)
+                    st.markdown("### 🤖 Coach Response")
+                    st.success(ai_response)
 
-                with gr.Column():
-                    gr.Markdown("#### Excel Workbook Export")
-                    export_btn = gr.Button("📥 Generate Professional Excel Report", variant="primary")
-                    excel_file = gr.File(label="Download Excel File (.xlsx)")
+                    if os.path.exists(audio_path):
+                        os.remove(audio_path)
+                except Exception as e:
+                    st.error(f"Error: {e}")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-                    def generate_excel():
-                        analytics = db.get_comprehensive_analytics()
-                        output = io.BytesIO()
-                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                            df_exp = pd.DataFrame(analytics["expense_records"]) if analytics["expense_records"] else pd.DataFrame(columns=["ID", "Store/Merchant", "Date", "Amount (DJF)", "Category"])
-                            df_inc = pd.DataFrame(analytics["income_records"]) if analytics["income_records"] else pd.DataFrame(columns=["ID", "Income Source", "Date", "Amount (DJF)", "Category"])
-                            
-                            df_inc.to_excel(writer, sheet_name='Income Ledger', index=False)
-                            df_exp.to_excel(writer, sheet_name='Expense Ledger', index=False)
-                        
-                        file_path = f"aura_finance_report_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
-                        with open(file_path, "wb") as f:
-                            f.write(output.getvalue())
-                        return file_path
 
-                    export_btn.click(fn=generate_excel, outputs=excel_file)
+# --- TAB 6: BUDGET & EXCEL EXPORT ---
+with tab6:
+    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+    st.subheader("📈 Monthly Budgeting & Excel Reports")
+    
+    col_b1, col_b2 = st.columns(2)
+    with col_b1:
+        st.markdown("#### Budget Limit Check")
+        budget_limit = st.number_input("Monthly Spending Limit (DJF)", min_value=1000.0, value=50000.0, step=5000.0)
+        analytics = db.get_comprehensive_analytics()
+        spent = analytics["monthly_expense"]
+        
+        progress = min(spent / budget_limit, 1.0)
+        st.progress(progress)
+        st.write(f"Spent **{spent:,.2f} DJF** out of **{budget_limit:,.2f} DJF** limit.")
+        
+        if spent > budget_limit:
+            st.error("🚨 Over Budget!")
+        else:
+            st.success("✨ Within Budget!")
 
-# Run app and create public link easily
-if __name__ == "__main__":
-    demo.launch(share=True)
+    with col_b2:
+        st.markdown("#### Export Excel Workbook")
+        if st.button("📥 Generate Professional Excel (.xlsx)"):
+            try:
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df_exp = pd.DataFrame(analytics["expense_records"]) if analytics["expense_records"] else pd.DataFrame(columns=["ID", "Store/Merchant", "Date", "Amount (DJF)", "Category"])
+                    df_inc = pd.DataFrame(analytics["income_records"]) if analytics["income_records"] else pd.DataFrame(columns=["ID", "Income Source", "Date", "Amount (DJF)", "Category"])
+                    
+                    df_inc.to_excel(writer, sheet_name='Income Ledger', index=False)
+                    df_exp.to_excel(writer, sheet_name='Expense Ledger', index=False)
+                
+                excel_data = output.getvalue()
+                st.download_button(
+                    label="📥 Download Excel File",
+                    data=excel_data,
+                    file_name=f"aura_finance_report_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+                st.success("Excel report generated successfully!")
+            except Exception as e:
+                st.error(f"Error: {e}")
+    st.markdown('</div>', unsafe_allow_html=True)
